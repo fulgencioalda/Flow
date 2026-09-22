@@ -35,8 +35,10 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager \
             "platform-tools" \
-            "platforms;android-37" \
+            "platforms;android-37.2" \
             "build-tools;36.0.0"
+          # Google publishes the current API 37 platform as extension 37.2.
+          ln -s android-37.2 "$ANDROID_HOME/platforms/android-37"
 
       - name: Show build environment
         shell: bash
