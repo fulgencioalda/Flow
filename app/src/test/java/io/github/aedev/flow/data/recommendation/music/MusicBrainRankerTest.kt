@@ -7,6 +7,8 @@
 package io.github.aedev.flow.data.recommendation.music
 
 import com.google.common.truth.Truth.assertThat
+import io.github.aedev.flow.data.music.model.MusicArtist
+import io.github.aedev.flow.data.music.model.MusicTrack
 import org.junit.Test
 
 class MusicBrainRankerTest {
@@ -149,6 +151,20 @@ class MusicBrainRankerTest {
                 maxRun = MusicBrainParams.RADIO_MAX_CONSECUTIVE_ARTIST,
             )
         assertThat(order).isEqualTo(listOf(0, 1, 2))
+    }
+
+    @Test
+    fun `radio batch keeps one track per artist and credits collaborators`() {
+        val tracks = listOf(
+            MusicTrack("one", "One", "A", "", 1, artists = listOf(MusicArtist("A", "a"), MusicArtist("B", "b"))),
+            MusicTrack("two", "Two", "A", "", 1, artists = listOf(MusicArtist("A", "a"))),
+            MusicTrack("three", "Three", "C", "", 1, artists = listOf(MusicArtist("C", "c"))),
+        )
+        assertThat(tracks.first().allArtistKeys()).containsExactly("a", "b")
+
+        val inputs = tracks.map { input(it.videoId, it.primaryArtistKey()) }
+        val order = MusicBrainRanker.spreadArtists(inputs.indices.toList(), inputs, maxRun = 1)
+        assertThat(order.take(2)).containsExactly(0, 2).inOrder()
     }
 
     @Test

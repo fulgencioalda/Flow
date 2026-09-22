@@ -111,13 +111,20 @@ fun NavGraphBuilder.flowAppGraph(
         selectedBottomNavIndex.intValue = 0
         HomeScreen(
             onVideoClick = { video ->
-                navController.openVideoOrShorts(video, disableShortsPlayer) {
-                    playerViewModel.playVideo(it)
-                    GlobalPlayerState.setCurrentVideo(it)
+                if (video.isShort && !disableShortsPlayer) {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(video.id))
+                } else {
+                    playerViewModel.playVideo(video)
+                    GlobalPlayerState.setCurrentVideo(video)
                 }
             },
             onShortClick = { source ->
-                navController.openShortsOrPlayer(source, disableShortsPlayer)
+                val tappedId = source.openAtVideoId
+                if (disableShortsPlayer && tappedId != null) {
+                    navController.navigateToPlayer(tappedId)
+                } else {
+                    navController.openShorts(source)
+                }
             },
             onSearchClick = {
                 navController.navigate("search")
@@ -181,13 +188,20 @@ fun NavGraphBuilder.flowAppGraph(
         selectedBottomNavIndex.intValue = 3
         SubscriptionsScreen(
             onVideoClick = { video ->
-                navController.openVideoOrShorts(video, disableShortsPlayer) {
-                    playerViewModel.playVideo(it)
-                    GlobalPlayerState.setCurrentVideo(it)
+                if (video.isShort && !disableShortsPlayer) {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(video.id))
+                } else {
+                    playerViewModel.playVideo(video)
+                    GlobalPlayerState.setCurrentVideo(video)
                 }
             },
             onShortClick = { source ->
-                navController.openShortsOrPlayer(source, disableShortsPlayer)
+                val tappedId = source.openAtVideoId
+                if (disableShortsPlayer && tappedId != null) {
+                    navController.navigateToPlayer(tappedId)
+                } else {
+                    navController.openShorts(source)
+                }
             },
             onChannelClick = { channel ->
                 if (channel.isMusic && channel.id.isNotBlank()) {
@@ -234,7 +248,11 @@ fun NavGraphBuilder.flowAppGraph(
                 navController.navigate("settings")
             },
             onVideoClick = { video ->
-                navController.openVideoOrShorts(video, disableShortsPlayer) { navController.navigateToPlayer(it.id) }
+                if (video.isShort && !disableShortsPlayer) {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(video.id))
+                } else {
+                    navController.navigateToPlayer(video.id)
+                }
             },
             onMusicClick = { track, queue, sourceName ->
                 musicPlayerViewModel.loadAndPlayTrack(track, queue, sourceName)
@@ -266,7 +284,11 @@ fun NavGraphBuilder.flowAppGraph(
                 )
             },
             onSavedShortClick = { video ->
-                navController.openShortsOrPlayer(ShortsQueueSource.Saved(video.id), disableShortsPlayer)
+                if (disableShortsPlayer) {
+                    navController.navigateToPlayer(video.id)
+                } else {
+                    navController.openShorts(ShortsQueueSource.Saved(video.id))
+                }
             },
         )
     }
@@ -278,10 +300,19 @@ fun NavGraphBuilder.flowAppGraph(
         selectedBottomNavIndex.intValue = 5
         SearchScreen(
             onVideoClick = { video ->
-                navController.openVideoOrShorts(video, disableShortsPlayer) { navController.navigateToPlayer(it.id) }
+                if (video.isShort && !disableShortsPlayer) {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(video.id))
+                } else {
+                    navController.navigateToPlayer(video.id)
+                }
             },
             onShortsQueue = { source ->
-                navController.openShortsOrPlayer(source, disableShortsPlayer)
+                val tappedId = source.openAtVideoId
+                if (disableShortsPlayer && tappedId != null) {
+                    navController.navigateToPlayer(tappedId)
+                } else {
+                    navController.openShorts(source)
+                }
             },
             onChannelClick = { channel ->
                 navController.navigateToYoutubeChannel(channel.url.ifBlank { channel.id })
@@ -301,13 +332,21 @@ fun NavGraphBuilder.flowAppGraph(
         selectedBottomNavIndex.intValue = 6
         io.github.aedev.flow.ui.screens.categories.CategoriesScreen(
             onVideoClick = { video ->
-                navController.openVideoOrShorts(video, disableShortsPlayer) { navController.navigateToPlayer(it.id) }
+                if (video.isShort && !disableShortsPlayer) {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(video.id))
+                } else {
+                    navController.navigateToPlayer(video.id)
+                }
             },
             onChannelClick = { channelId ->
                 navController.navigateToYoutubeChannel(channelId)
             },
             onShortClick = { videoId ->
-                navController.openShortsOrPlayer(ShortsQueueSource.SeededFeed(videoId), disableShortsPlayer)
+                if (disableShortsPlayer) {
+                    navController.navigateToPlayer(videoId)
+                } else {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(videoId))
+                }
             },
             onPlaylistClick = { playlistId ->
                 navController.navigate("playlist/$playlistId")
@@ -575,16 +614,27 @@ fun NavGraphBuilder.flowAppGraph(
         ChannelScreen(
             channelUrl = channelUrl,
             onVideoClick = { video ->
-                navController.openVideoOrShorts(video, disableShortsPlayer) { navController.navigateToPlayer(it.id) }
+                if (video.isShort && !disableShortsPlayer) {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(video.id))
+                } else {
+                    navController.navigateToPlayer(video.id)
+                }
             },
             onChannelClick = { channelId ->
                 navController.navigateToYoutubeChannel(channelId)
             },
             onShortClick = { videoId, sortIndex ->
-                navController.openShortsOrPlayer(
-                    ShortsQueueSource.Channel(channelUrl = channelUrl, startVideoId = videoId, sortIndex = sortIndex),
-                    disableShortsPlayer,
-                )
+                if (disableShortsPlayer) {
+                    navController.navigateToPlayer(videoId)
+                } else {
+                    navController.openShorts(
+                        ShortsQueueSource.Channel(
+                            channelUrl = channelUrl,
+                            startVideoId = videoId,
+                            sortIndex = sortIndex,
+                        ),
+                    )
+                }
             },
             onPlaylistClick = { playlistId ->
                 navController.navigate("playlist/$playlistId")
@@ -627,7 +677,12 @@ fun NavGraphBuilder.flowAppGraph(
                 }
             },
             onShortsQueue = { source ->
-                navController.openShortsOrPlayer(source, disableShortsPlayer)
+                val tappedId = source.openAtVideoId
+                if (disableShortsPlayer && tappedId != null) {
+                    navController.navigateToPlayer(tappedId)
+                } else {
+                    navController.openShorts(source)
+                }
             },
             onMusicClick = { track, queue ->
                 if (track.videoId.startsWith("local_")) {
@@ -702,8 +757,10 @@ fun NavGraphBuilder.flowAppGraph(
             onVideoClick = { video ->
                 if (video.isMusic) {
                     navController.navigate("musicPlayer/${video.id}")
+                } else if (video.isShort && !disableShortsPlayer) {
+                    navController.openShorts(ShortsQueueSource.SeededFeed(video.id))
                 } else {
-                    navController.openVideoOrShorts(video, disableShortsPlayer) { navController.navigateToPlayer(it.id) }
+                    navController.navigateToPlayer(video.id)
                 }
             },
             onPlayPlaylist = { videos, index ->
@@ -722,7 +779,11 @@ fun NavGraphBuilder.flowAppGraph(
         io.github.aedev.flow.ui.screens.library.SavedShortsGridScreen(
             onBackClick = { navController.popBackStack() },
             onVideoClick = { videoId ->
-                navController.openShortsOrPlayer(ShortsQueueSource.Saved(videoId), disableShortsPlayer)
+                if (disableShortsPlayer) {
+                    navController.navigateToPlayer(videoId)
+                } else {
+                    navController.openShorts(ShortsQueueSource.Saved(videoId))
+                }
             },
         )
     }

@@ -31,8 +31,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
-import androidx.compose.material.icons.automirrored.outlined.QueueMusic
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Explicit
 import androidx.compose.material.icons.rounded.Repeat
@@ -88,8 +87,8 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
 /**
- * The pull-up queue: reorder by holding and dragging a row, swipe a row toward the start to play
- * it next or toward the end to send it to the back of the queue, and an endless-radio section
+ * The pull-up queue: reorder by holding and dragging a row, swipe a row in either direction to
+ * remove it and block its artist, and an endless-radio section
  * that continues playback with suggestions when the queue runs out.
  */
 @Composable
@@ -106,11 +105,9 @@ fun QueueSheet(
     downloadedTrackIds: Set<String>,
     onTrackClick: (Int) -> Unit,
     onMoveTrack: (Int, Int) -> Unit,
-    onPlayNextFromQueue: (Int) -> Unit,
-    onSendQueueTrackToEnd: (Int) -> Unit,
+    onRemoveAndBlockTrack: (Int) -> Unit,
     onRadioTrackClick: (MusicTrack) -> Unit,
-    onPlayNextRadio: (MusicTrack) -> Unit,
-    onAddRadioToQueue: (MusicTrack) -> Unit,
+    onRemoveAndBlockRadio: (MusicTrack) -> Unit,
     onToggleEndlessRadio: (Boolean) -> Unit,
     onShuffleQueue: () -> Unit,
     onCycleRepeat: () -> Unit,
@@ -325,8 +322,7 @@ fun QueueSheet(
                             flyOffOnCommit = false,
                             rowKey = localKeys.getOrNull(index) ?: track.videoId,
                             onClick = { onTrackClick(index) },
-                            onPlayNext = { onPlayNextFromQueue(index) },
-                            onAddToQueue = { onSendQueueTrackToEnd(index) },
+                            onRemoveAndBlock = { onRemoveAndBlockTrack(index) },
                             modifier =
                                 Modifier
                                     .graphicsLayer {
@@ -391,8 +387,7 @@ fun QueueSheet(
                                 flyOffOnCommit = true,
                                 rowKey = "radio:${track.videoId}",
                                 onClick = { onRadioTrackClick(track) },
-                                onPlayNext = { onPlayNextRadio(track) },
-                                onAddToQueue = { onAddRadioToQueue(track) },
+                                onRemoveAndBlock = { onRemoveAndBlockRadio(track) },
                             )
                         }
                     }
@@ -445,8 +440,7 @@ private fun QueueTrackRow(
     flyOffOnCommit: Boolean,
     rowKey: Any,
     onClick: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToQueue: () -> Unit,
+    onRemoveAndBlock: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -455,8 +449,7 @@ private fun QueueTrackRow(
 
     var rowSizePx by remember { mutableStateOf(IntSize.Zero) }
     val offsetX = remember(rowKey) { Animatable(0f) }
-    val currentOnPlayNext by rememberUpdatedState(onPlayNext)
-    val currentOnAddToQueue by rememberUpdatedState(onAddToQueue)
+    val currentOnRemoveAndBlock by rememberUpdatedState(onRemoveAndBlock)
     val swipeHandler =
         remember(rowKey) {
             QueueRowSwipeGestureHandler(
@@ -468,8 +461,7 @@ private fun QueueTrackRow(
                 flyOffOnCommit = flyOffOnCommit,
                 onCommit = { action ->
                     when (action) {
-                        QueueSwipeAction.PLAY_NEXT -> currentOnPlayNext()
-                        QueueSwipeAction.ADD_TO_QUEUE -> currentOnAddToQueue()
+                        QueueSwipeAction.REMOVE_AND_BLOCK -> currentOnRemoveAndBlock()
                     }
                 },
             )
@@ -651,18 +643,8 @@ private fun BoxScope.SwipeRevealPanel(
     val revealProgress = (revealWidthPx / (56.dp.value * density.density)).coerceIn(0f, 1f)
     val towardStart = offsetX < 0f
 
-    val containerColor =
-        if (towardStart) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.tertiaryContainer
-        }
-    val contentColor =
-        if (towardStart) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onTertiaryContainer
-        }
+    val containerColor = MaterialTheme.colorScheme.errorContainer
+    val contentColor = MaterialTheme.colorScheme.onErrorContainer
     val backgroundColor by animateColorAsState(
         targetValue = if (isTargeted) containerColor else containerColor.copy(alpha = 0.82f),
         animationSpec = tween(durationMillis = 150),
@@ -696,14 +678,10 @@ private fun BoxScope.SwipeRevealPanel(
     ) {
         Icon(
             imageVector =
-                if (towardStart) {
-                    Icons.AutoMirrored.Outlined.PlaylistPlay
-                } else {
-                    Icons.AutoMirrored.Outlined.QueueMusic
-                },
+                Icons.Outlined.Block,
             contentDescription =
                 stringResource(
-                    if (towardStart) R.string.play_next else R.string.add_to_queue,
+                    R.string.remove_and_block_artist,
                 ),
             tint = contentColor,
             modifier =

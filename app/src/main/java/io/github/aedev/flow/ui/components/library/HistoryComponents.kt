@@ -40,11 +40,10 @@ import io.github.aedev.flow.data.model.Video
 import io.github.aedev.flow.data.model.toMusicTrack
 import io.github.aedev.flow.data.model.toVideo
 import io.github.aedev.flow.data.music.model.MusicTrack
+import io.github.aedev.flow.ui.components.ShortsCard
 import io.github.aedev.flow.ui.components.shared.FastScrollbar
 import io.github.aedev.flow.ui.components.shared.FlowFilterChip
 import io.github.aedev.flow.ui.components.shared.MediaRowAction
-import io.github.aedev.flow.ui.components.shared.MediaShortCard
-import io.github.aedev.flow.ui.components.shared.ShortCardDefaults
 import io.github.aedev.flow.ui.components.shared.animateMediaListItem
 import io.github.aedev.flow.ui.screens.history.HistoryContentFilter
 import io.github.aedev.flow.ui.screens.history.HistorySort
@@ -339,14 +338,14 @@ internal fun ShortsHistoryRow(
 
     LazyRow(
         contentPadding = ShortsRowPadding,
-        horizontalArrangement = Arrangement.spacedBy(ShortCardDefaults.Spacing),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(
             items = rowVideos,
             key = Video::id,
             contentType = { "short" },
         ) { video ->
-            MediaShortCard(
+            ShortsCard(
                 video = video,
                 onClick = { onShortClick(rowVideos, video) },
                 trailingContent = {

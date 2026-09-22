@@ -235,7 +235,7 @@ fun FlowApp(
                     val route = currentRoute.value
                     if (!bottomNavHideOnScroll ||
                         source != NestedScrollSource.UserInput ||
-                        route == SHORTS_ROUTE_KEY
+                        route == "shorts"
                     ) {
                         return Offset.Zero
                     }
@@ -265,7 +265,7 @@ fun FlowApp(
 
     val isInPipMode by GlobalPlayerState.isInPipMode.collectAsState()
     val currentVideo by GlobalPlayerState.currentVideo.collectAsState()
-    val isShortsPlayerRoute = currentRoute.value == SHORTS_ROUTE_KEY
+    val isShortsPlayerRoute = currentRoute.value == "shorts"
 
     LaunchedEffect(isShortsPlayerRoute) {
         if (isShortsPlayerRoute) {

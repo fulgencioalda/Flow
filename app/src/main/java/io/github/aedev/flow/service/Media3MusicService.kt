@@ -43,6 +43,7 @@ import io.github.aedev.flow.data.music.YouTubeMusicService
 import io.github.aedev.flow.data.music.model.MusicTrack
 import io.github.aedev.flow.data.newmusic.InnertubeMusicService
 import io.github.aedev.flow.data.recommendation.music.MusicBrainEngine
+import io.github.aedev.flow.data.recommendation.music.MusicBrainParams
 import io.github.aedev.flow.extensions.setOffloadEnabled
 import io.github.aedev.flow.innertube.YouTube
 import io.github.aedev.flow.innertube.models.WatchEndpoint
@@ -88,7 +89,7 @@ class Media3MusicService : MediaLibraryService() {
         // LOW_WATER/BATCH mirror the desktop station (3 / 10).
         private const val RADIO_MIN_UPCOMING = 3
         private const val RADIO_APPEND_BATCH = 10
-        private const val RADIO_POOL_LOW_WATER = 15
+        private const val RADIO_POOL_LOW_WATER = MusicBrainParams.RADIO_MIN_POOL_RESERVE
         private const val LOCAL_MEDIA_PREFIX = "local_"
 
         private val CommandToggleShuffle = SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY)
@@ -140,11 +141,14 @@ class Media3MusicService : MediaLibraryService() {
     private var radioAutoplayEnabled = true
     private var loudnessNormalizationEnabled = true
     private var lastQueueIds: List<String>? = null
+    /** Tracks that actually reached playback; future queue items are never included. */
+    private val radioPlayedHistory = ArrayDeque<MusicTrack>()
 
     // Queue-end continuation: appends go through the manager's MediaController and
     // land asynchronously, so a resume at STATE_ENDED must wait for the timeline.
     private var radioResumeWhenAppended = false
     private var radioEndedItemCount = 0
+    private var queueEndAdvanceJob: Job? = null
 
     private val retryCountMap = mutableMapOf<String, Int>()
     private val lastPlaybackErrorAtMap = mutableMapOf<String, Long>()
@@ -361,6 +365,8 @@ class Media3MusicService : MediaLibraryService() {
                         val title = item.mediaMetadata.title?.toString()
                         val artist = item.mediaMetadata.artist?.toString()
 
+                        rememberPlayedRadioTrack(videoId)
+
                         if (!videoId.isNullOrBlank() && !videoId.startsWith(LOCAL_MEDIA_PREFIX)) {
                             // Desktop radio semantics: only a genuinely NEW queue seeds a
                             // fresh radio. In-app skips also arrive as PLAYLIST_CHANGED
@@ -424,12 +430,13 @@ class Media3MusicService : MediaLibraryService() {
                         finalizeListenSession()
                     }
                     if (playbackState == Player.STATE_ENDED) {
-                        // Radio raced the queue end: append now and keep playing.
-                        maybeExtendRadio()
-                        if (player.hasNextMediaItem()) {
-                            player.seekToNextMediaItem()
-                            player.play()
-                        }
+                        // A queue-end callback can arrive before radio candidates have
+                        // finished resolving. Keep a short, bounded continuation window
+                        // so a one-track start and a normal queue both advance reliably.
+                        continueAfterQueueEnd()
+                    } else {
+                        queueEndAdvanceJob?.cancel()
+                        queueEndAdvanceJob = null
                     }
                     if (playbackState == Player.STATE_READY) {
                         refreshLearnDuration()
@@ -466,6 +473,27 @@ class Media3MusicService : MediaLibraryService() {
                 }
             },
         )
+    }
+
+    private fun continueAfterQueueEnd() {
+        if (queueEndAdvanceJob?.isActive == true) return
+        queueEndAdvanceJob =
+            lifecycleScope.launch {
+                repeat(40) {
+                    if (!player.playWhenReady) return@launch
+                    if (player.hasNextMediaItem()) {
+                        player.seekToNextMediaItem()
+                        player.prepare()
+                        player.play()
+                        return@launch
+                    }
+
+                    // This may append radio tracks asynchronously through the manager.
+                    maybeExtendRadio()
+                    delay(250L)
+                }
+                Log.w(TAG, "Queue ended without an available next music item")
+            }
     }
 
     // ── Listen-session accounting (feeds MusicBrainEngine) ──
@@ -1116,6 +1144,7 @@ class Media3MusicService : MediaLibraryService() {
         radioContinuation = null
         radioEndpoint = null
         radioResumeWhenAppended = false
+        radioPlayedHistory.clear()
         startRadio(currentId)
     }
 
@@ -1149,7 +1178,7 @@ class Media3MusicService : MediaLibraryService() {
                         radioEndpoint = null
                         mapped =
                             YouTubeMusicService
-                                .getRelatedMusic(seedId, 20, audioOnly = true)
+                                .getRelatedMusic(seedId, MusicBrainParams.RADIO_MAX_CANDIDATE_WINDOW, audioOnly = true)
                                 .filterNot { it.videoId == seedId }
                                 .distinctBy { it.videoId }
                     } else {
@@ -1157,7 +1186,8 @@ class Media3MusicService : MediaLibraryService() {
                         radioEndpoint = page?.endpoint
                     }
 
-                    val ranked = musicBrain.rankTracks(mapped, "radio")
+                    val cooldownFiltered = musicBrain.filterRadioCooldown(mapped)
+                    val ranked = musicBrain.rankTracks(cooldownFiltered, "radio")
                     Log.d(TAG, "Radio seeded from $seedId: ${ranked.size} tracks, continuation=${radioContinuation != null}")
                     if (ranked.isNotEmpty()) {
                         io.github.aedev.flow.player.EnhancedMusicPlayerManager
@@ -1185,6 +1215,10 @@ class Media3MusicService : MediaLibraryService() {
         // Repeat already produces an endless queue — matching desktop.
         if (player.repeatMode != Player.REPEAT_MODE_OFF) return
         val manager = io.github.aedev.flow.player.EnhancedMusicPlayerManager
+        // Use playback history, not the queue tail: the queue tail contains
+        // future tracks and previously caused artists to be suppressed before
+        // they had actually played.
+        manager.currentTrack.value?.let { rememberPlayedRadioTrack(it.videoId) }
         val ended = player.playbackState == Player.STATE_ENDED
         // Shuffle keeps meaning "shuffle MY queue" while it plays, but once the
         // shuffled queue is exhausted the radio still has to carry on.
@@ -1208,8 +1242,13 @@ class Media3MusicService : MediaLibraryService() {
         val candidates =
             manager.automixItems.value
                 .filterNot { it.videoId in queueIds }
-                .take(RADIO_APPEND_BATCH * 2)
-        val batch = musicBrain.sequenceRadioBatch(candidates, manager.queue.value.lastOrNull(), RADIO_APPEND_BATCH)
+                .take(MusicBrainParams.RADIO_MAX_CANDIDATE_WINDOW)
+        val batch = musicBrain.sequenceRadioBatch(
+            candidates = candidates,
+            previousTrack = manager.queue.value.lastOrNull(),
+            limit = RADIO_APPEND_BATCH,
+            recentTracks = radioPlayedHistory.toList(),
+        )
         if (ended && batch.isNotEmpty() && !radioResumeWhenAppended) {
             radioResumeWhenAppended = true
             radioEndedItemCount = player.mediaItemCount
@@ -1228,45 +1267,65 @@ class Media3MusicService : MediaLibraryService() {
         if (manager.automixItems.value.size < RADIO_POOL_LOW_WATER || (ended && batch.isEmpty())) extendRadioPool()
     }
 
-    /** Fetch the next radio page and APPEND it to the pool — never replaces. */
+    private fun rememberPlayedRadioTrack(videoId: String?) {
+        if (radioSeedId == null || videoId.isNullOrBlank() || videoId.startsWith(LOCAL_MEDIA_PREFIX)) return
+        val manager = io.github.aedev.flow.player.EnhancedMusicPlayerManager
+        val track = manager.queue.value.firstOrNull { it.videoId == videoId } ?: return
+        if (radioPlayedHistory.lastOrNull()?.videoId == track.videoId) return
+        radioPlayedHistory.removeAll { it.videoId == track.videoId }
+        radioPlayedHistory.addLast(track)
+        while (radioPlayedHistory.size > MusicBrainParams.RADIO_DIVERSITY_WINDOW) {
+            radioPlayedHistory.removeFirst()
+        }
+    }
+
+    /** Fetch radio pages until the suggestion pool reaches its configured reserve. */
     private fun extendRadioPool() {
         if (radioTopUpJob?.isActive == true) return
         radioTopUpJob =
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val manager = io.github.aedev.flow.player.EnhancedMusicPlayerManager
-                    val endpoint = radioEndpoint
-                    val continuation = radioContinuation
-                    val page =
-                        if (endpoint != null && continuation != null) {
-                            YouTube.next(endpoint, continuation).getOrNull()
-                        } else {
-                            // Continuation exhausted: grow the tree from the newest tail.
-                            val tailId =
-                                (manager.automixItems.value.lastOrNull() ?: manager.queue.value.lastOrNull())
-                                    ?.videoId
-                                    ?.takeUnless { it.startsWith(LOCAL_MEDIA_PREFIX) }
-                                    ?: return@launch
-                            YouTube.next(WatchEndpoint(playlistId = "RDAMVM$tailId")).getOrNull()
-                        }
-                    if (page == null) return@launch
-                    radioContinuation = page.continuation
-                    radioEndpoint = page.endpoint
+                    var pagesFetched = 0
+                    while (
+                        manager.automixItems.value.size < RADIO_POOL_LOW_WATER &&
+                        pagesFetched < 8
+                    ) {
+                        val endpoint = radioEndpoint
+                        val continuation = radioContinuation
+                        val page =
+                            if (endpoint != null && continuation != null) {
+                                YouTube.next(endpoint, continuation).getOrNull()
+                            } else {
+                                // Continuation exhausted: grow the tree from the newest tail.
+                                val tailId =
+                                    (manager.automixItems.value.lastOrNull() ?: manager.queue.value.lastOrNull())
+                                        ?.videoId
+                                        ?.takeUnless { it.startsWith(LOCAL_MEDIA_PREFIX) }
+                                        ?: break
+                                YouTube.next(WatchEndpoint(playlistId = "RDAMVM$tailId")).getOrNull()
+                            }
+                        if (page == null) break
+                        pagesFetched++
+                        radioContinuation = page.continuation
+                        radioEndpoint = page.endpoint
 
-                    val mapped =
-                        page.items
-                            .mapNotNull { InnertubeMusicService.convertToMusicTrack(it) }
-                            .distinctBy { it.videoId }
-                    val ranked = musicBrain.rankTracks(mapped, "radio")
-                    Log.d(TAG, "Radio pool topped up with ${ranked.size} tracks, continuation=${radioContinuation != null}")
-                    if (ranked.isNotEmpty()) {
-                        manager.appendAutomixItems(ranked)
-                        // If the queue ended while this fetch was in flight, feed it
-                        // now — no further transition will ever call maybeExtendRadio.
-                        // Re-entry is safe: this job is still active, so a nested
-                        // extendRadioPool() is a no-op.
-                        withContext(Dispatchers.Main) { maybeExtendRadio() }
+                        val mapped =
+                            page.items
+                                .mapNotNull { InnertubeMusicService.convertToMusicTrack(it) }
+                                .distinctBy { it.videoId }
+                        val cooldownFiltered = musicBrain.filterRadioCooldown(mapped)
+                        val ranked = musicBrain.rankTracks(cooldownFiltered, "radio")
+                        if (ranked.isNotEmpty()) manager.appendAutomixItems(ranked)
+                        Log.d(
+                            TAG,
+                            "Radio pool page $pagesFetched added ${ranked.size}; " +
+                                "pool=${manager.automixItems.value.size}/$RADIO_POOL_LOW_WATER, " +
+                                "continuation=${radioContinuation != null}",
+                        )
+                        if (page.items.isEmpty() && radioContinuation == null) break
                     }
+                    withContext(Dispatchers.Main) { maybeExtendRadio() }
                 } catch (e: Exception) {
                     Log.w(TAG, "Radio top-up failed: ${e.message}")
                 }

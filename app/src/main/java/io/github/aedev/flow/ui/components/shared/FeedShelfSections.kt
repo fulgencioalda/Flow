@@ -53,6 +53,7 @@ import io.github.aedev.flow.ui.components.CompactVideoCard
 import io.github.aedev.flow.ui.components.FEED_MAX_AUTO_COLUMNS
 import io.github.aedev.flow.ui.components.PlaylistCard
 import io.github.aedev.flow.ui.components.PlaylistCardLayout
+import io.github.aedev.flow.ui.components.ShortsShelf
 import io.github.aedev.flow.ui.components.VideoCardFullWidth
 import io.github.aedev.flow.ui.components.feedCardsFormGrid
 import io.github.aedev.flow.ui.components.feedShelfPreviewCount
@@ -185,7 +186,7 @@ private fun LazyGridScope.shelfSection(
     if (section.items.isNotEmpty() && section.items.all { it is FeedItem.ShortItem }) {
         val shorts = section.items.map { (it as FeedItem.ShortItem).video }
         fullSpanItem(key = section.id) {
-            MediaShortsShelf(shorts = shorts, onShortClick = { _, tapped -> actions.onShortClick(tapped.id) })
+            ShortsShelf(shorts = shorts, onShortClick = { _, tapped -> actions.onShortClick(tapped.id) })
         }
         return
     }

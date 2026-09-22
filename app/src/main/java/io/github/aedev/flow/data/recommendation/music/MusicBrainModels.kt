@@ -170,6 +170,17 @@ fun musicPairKey(
 object MusicBrainParams {
     const val SCHEMA_VERSION = 1
 
+    // Automatic radio avoids replaying a track for 48 hours when enough
+    // alternatives exist; it relaxes to 24 hours only to keep the station alive.
+    const val RADIO_TRACK_COOLDOWN_MS = 48L * 60 * 60 * 1000
+    const val RADIO_TRACK_FALLBACK_COOLDOWN_MS = 24L * 60 * 60 * 1000
+    const val RADIO_MIN_BATCH_CANDIDATES = 10
+    const val RADIO_ARTIST_ROTATION_WINDOW = 20
+    const val RADIO_DIVERSITY_WINDOW = 50
+    const val RADIO_MAX_ARTIST_APPEARANCES = 2
+    const val RADIO_MAX_CANDIDATE_WINDOW = 50
+    const val RADIO_MIN_POOL_RESERVE = 100
+
     // Learning
     val milestones = doubleArrayOf(0.15, 0.50, 0.90)
     const val COUNT_MILESTONE = 0.50

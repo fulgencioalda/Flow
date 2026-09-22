@@ -573,7 +573,13 @@ object EnhancedMusicPlayerManager {
 
         _playerState.value = _playerState.value.copy(isPreparing = false)
 
-        val activeQueue = if (queue.isNotEmpty()) queue else listOf(track)
+        // A search result, playlist, or restored queue can contain the same video
+        // more than once. Keep the first occurrence so the selected track cannot
+        // be played twice merely because it was duplicated in the input queue.
+        val activeQueue =
+            (if (queue.isNotEmpty()) queue else listOf(track))
+                .distinctBy { it.videoId }
+                .ifEmpty { listOf(track) }
         _queue.value = activeQueue
         _currentTrack.value = track
         sourceName?.let { _playingFrom.value = it }
@@ -603,8 +609,9 @@ object EnhancedMusicPlayerManager {
     fun updateQueue(newQueue: List<MusicTrack>) {
         if (newQueue.isEmpty()) return
 
-        _queue.value = newQueue
-        if (pendingPlayNextMediaId != null && newQueue.none { it.videoId == pendingPlayNextMediaId }) {
+        val normalizedQueue = newQueue.distinctBy { it.videoId }
+        _queue.value = normalizedQueue
+        if (pendingPlayNextMediaId != null && normalizedQueue.none { it.videoId == pendingPlayNextMediaId }) {
             clearPendingPlayNext()
         }
         triggerQueueSave()
@@ -613,18 +620,23 @@ object EnhancedMusicPlayerManager {
             val currentMediaId = player?.currentMediaItem?.mediaId
             val currentPosition = player?.currentPosition ?: 0L
 
-            val mediaItems = newQueue.map { track -> buildMediaItem(track) }
+            val mediaItems = normalizedQueue.map { track -> buildMediaItem(track) }
+            val playerQueueIds =
+                player
+                    ?.let { p -> (0 until p.mediaItemCount).map { p.getMediaItemAt(it).mediaId } }
+                    .orEmpty()
+            val queueIds = normalizedQueue.map { it.videoId }
 
             val newIndex =
                 MusicQueuePlanner
                     .currentQueueIndex(
-                        queueIds = newQueue.map { it.videoId },
+                        queueIds = queueIds,
                         playerIndex = player?.currentMediaItemIndex ?: _currentQueueIndex.value,
                         currentTrackId = currentMediaId,
                     ).coerceAtLeast(0)
 
             player?.let { p ->
-                if (p.mediaItemCount != mediaItems.size || p.currentMediaItem?.mediaId != currentMediaId) {
+                if (playerQueueIds != queueIds || p.currentMediaItem?.mediaId != currentMediaId) {
                     p.setMediaItems(mediaItems, newIndex, currentPosition)
                 }
             }
@@ -836,6 +848,7 @@ object EnhancedMusicPlayerManager {
 
     fun addToQueue(track: MusicTrack) {
         val currentQ = _queue.value.toMutableList()
+        if (currentQ.any { it.videoId == track.videoId }) return
         currentQ.add(track)
         _queue.value = currentQ
 

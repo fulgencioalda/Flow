@@ -4,7 +4,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import org.schabi.newpipe.extractor.utils.Utils
 
@@ -13,8 +12,6 @@ internal fun JsonElement?.objectOrNull(): JsonObject? = this as? JsonObject
 internal fun JsonElement?.arrayOrNull(): JsonArray? = this as? JsonArray
 
 internal fun JsonElement?.stringOrNull(): String? = (this as? JsonPrimitive)?.contentOrNull
-
-internal fun JsonElement?.booleanOrNull(): Boolean? = (this as? JsonPrimitive)?.booleanOrNull
 
 /** Reads the primitive and structured text shapes used by YouTube renderers and entity payloads. */
 internal fun JsonElement?.youtubeText(): String? {

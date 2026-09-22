@@ -235,6 +235,36 @@ class MusicBrainEngine
         }
 
         /**
+         * Remove recently played tracks from automatic radio. The normal window is
+         * 48 hours; when that leaves fewer than one full append batch, relax it to
+         * 24 hours so radio does not stop for users with a small library.
+         */
+        suspend fun filterRadioCooldown(tracks: List<MusicTrack>): List<MusicTrack> {
+            if (tracks.isEmpty()) return tracks
+            ensureInitialized()
+            return mutex.withLock {
+                val now = System.currentTimeMillis()
+
+                fun eligible(cooldownMs: Long): List<MusicTrack> =
+                    tracks
+                        .asSequence()
+                        .filter { track ->
+                            val lastPlayed = brain.trackPlays[track.videoId]?.maxOrNull() ?: 0L
+                            !brain.isArtistBlocked(track.primaryArtistKey()) &&
+                                (lastPlayed == 0L || now - lastPlayed >= cooldownMs)
+                        }.distinctBy { it.videoId }
+                        .toList()
+
+                val strict = eligible(MusicBrainParams.RADIO_TRACK_COOLDOWN_MS)
+                if (strict.size >= MusicBrainParams.RADIO_MIN_BATCH_CANDIDATES) {
+                    strict
+                } else {
+                    eligible(MusicBrainParams.RADIO_TRACK_FALLBACK_COOLDOWN_MS)
+                }
+            }
+        }
+
+        /**
          * Order a radio append batch so adjacent tracks never share an artist (when an
          * alternative exists), seeded with the current queue tail so the seam between
          * the queue and the appended batch is covered too. Pure sequencing — candidates
@@ -245,17 +275,90 @@ class MusicBrainEngine
             candidates: List<MusicTrack>,
             previousTrack: MusicTrack?,
             limit: Int,
+            recentTracks: List<MusicTrack> = emptyList(),
         ): List<MusicTrack> {
             if (candidates.isEmpty() || limit <= 0) return emptyList()
-            val inputs = candidates.map { MusicRankInput(trackId = it.videoId, artistKey = it.primaryArtistKey()) }
-            val order =
-                MusicBrainRanker.spreadArtists(
-                    order = inputs.indices.toList(),
-                    inputs = inputs,
-                    maxRun = MusicBrainParams.RADIO_MAX_CONSECUTIVE_ARTIST,
-                    previousArtist = previousTrack?.primaryArtistKey(),
+            val unique = candidates.distinctBy { it.videoId }
+            val previous = previousTrack?.primaryArtistKey().orEmpty()
+            val diversityHistory = recentTracks.takeLast(MusicBrainParams.RADIO_DIVERSITY_WINDOW)
+            val rotationHistory = diversityHistory.takeLast(MusicBrainParams.RADIO_ARTIST_ROTATION_WINDOW)
+            val recentArtistKeys = rotationHistory
+                .flatMap { it.allArtistKeys() }
+                .filter { it.isNotEmpty() }
+                .toSet() + previous
+            val recentArtistCounts = diversityHistory
+                .flatMap { track -> track.primaryArtistKey().takeIf { it.isNotEmpty() }?.let { listOf(it) }.orEmpty() }
+                .groupingBy { it }
+                .eachCount()
+            val recentTrackKeys = diversityHistory.map { it.radioTrackKey() }.toSet()
+            val recentAlbumCounts = diversityHistory
+                .mapNotNull { it.album.trim().takeIf(String::isNotEmpty) }
+                .groupingBy { it.lowercase() }
+                .eachCount()
+
+            fun select(
+                pool: List<MusicTrack>,
+                avoidRecent: Boolean,
+                enforceArtistWindow: Boolean,
+                avoidRepeatedSongs: Boolean,
+                enforceAlbumWindow: Boolean,
+            ): List<MusicTrack> {
+                val selectedArtists = HashSet<String>()
+                val selectedPrimaryCounts = HashMap<String, Int>()
+                val selectedTrackKeys = HashSet<String>()
+                val selectedAlbums = HashSet<String>()
+                val selected = ArrayList<MusicTrack>(limit)
+                val prioritizedPool = pool.sortedWith(
+                    compareBy<MusicTrack> { recentArtistCounts[it.primaryArtistKey()] ?: 0 }
+                        .thenBy { recentTrackKeys.contains(it.radioTrackKey()) }
                 )
-            return order.take(limit).map { candidates[it] }
+                for (track in prioritizedPool) {
+                    if (selected.size >= limit) break
+                    val artists = track.allArtistKeys()
+                    val primary = track.primaryArtistKey()
+                    if (primary.isEmpty()) continue
+                    if (avoidRecent && artists.any { it in recentArtistKeys }) continue
+                    val trackKey = track.radioTrackKey()
+                    if (avoidRepeatedSongs && trackKey in recentTrackKeys) continue
+                    if (enforceArtistWindow &&
+                        ((recentArtistCounts[primary] ?: 0) + (selectedPrimaryCounts[primary] ?: 0)) >=
+                            MusicBrainParams.RADIO_MAX_ARTIST_APPEARANCES
+                    ) continue
+                    val albumKey = track.album.trim().lowercase()
+                    if (albumKey.isNotEmpty() && enforceAlbumWindow &&
+                        ((recentAlbumCounts[albumKey] ?: 0) >= 2 || albumKey in selectedAlbums)
+                    ) continue
+                    if (artists.any { it in selectedArtists }) continue
+                    if (!selectedTrackKeys.add(trackKey)) continue
+                    selected += track
+                    selectedArtists += artists
+                    selectedPrimaryCounts[primary] = (selectedPrimaryCounts[primary] ?: 0) + 1
+                    if (albumKey.isNotEmpty()) selectedAlbums += albumKey
+                }
+                return selected
+            }
+
+            // Strict pass: one song per credited artist and no artist from the last
+            // 20 radio tracks (the two normal ten-track append batches).
+            val strict = select(unique, avoidRecent = true, enforceArtistWindow = true, avoidRepeatedSongs = true, enforceAlbumWindow = true)
+            if (strict.size >= limit) return strict
+
+            // First fallback keeps one song per credited artist but relaxes the
+            // 20-track rotation so stations with a narrow catalogue stay alive.
+            val relaxed = select(unique, avoidRecent = false, enforceArtistWindow = true, avoidRepeatedSongs = true, enforceAlbumWindow = true)
+            if (relaxed.size >= limit) return relaxed
+
+            // Final fallback fills only when necessary; it still preserves the
+            // artist seam and never duplicates a video id.
+            val inputs = unique.map { MusicRankInput(trackId = it.videoId, artistKey = it.primaryArtistKey()) }
+            val order = MusicBrainRanker.spreadArtists(
+                order = inputs.indices.toList(),
+                inputs = inputs,
+                maxRun = MusicBrainParams.RADIO_MAX_CONSECUTIVE_ARTIST,
+                previousArtist = previous,
+            )
+            val finalFallback = select(unique, avoidRecent = false, enforceArtistWindow = false, avoidRepeatedSongs = false, enforceAlbumWindow = false)
+            return (relaxed + finalFallback + order.map { unique[it] }).distinctBy { it.videoId }.take(limit)
         }
 
         /**
@@ -513,6 +616,27 @@ class MusicBrainEngine
 internal fun MusicTrack.primaryArtistKey(): String {
     val primary = artists.firstOrNull()
     return musicArtistKey(primary?.id ?: channelId.takeIf { it.isNotBlank() }, primary?.name ?: artist)
+}
+
+/** All credited artist identities used by radio rotation and hidden-artist checks. */
+internal fun MusicTrack.allArtistKeys(): Set<String> = buildSet {
+    val primary = primaryArtistKey()
+    if (primary.isNotEmpty()) add(primary)
+    artists.forEach { credited ->
+        val key = musicArtistKey(credited.id, credited.name)
+        if (key.isNotEmpty()) add(key)
+    }
+}
+
+/** Stable title/artist identity used to avoid replaying another upload of the same song. */
+internal fun MusicTrack.radioTrackKey(): String {
+    val normalizedTitle = title
+        .lowercase()
+        .replace(Regex("\\b(official|video|audio|lyrics|remaster|version)\\b"), " ")
+        .replace(Regex("[^a-z0-9áéíóúüñ]+"), " ")
+        .trim()
+        .replace(Regex("\\s+"), " ")
+    return if (normalizedTitle.isBlank()) videoId else "${primaryArtistKey()}|$normalizedTitle"
 }
 
 /**

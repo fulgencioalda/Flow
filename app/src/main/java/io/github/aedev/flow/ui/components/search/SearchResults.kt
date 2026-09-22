@@ -21,10 +21,9 @@ import io.github.aedev.flow.data.paging.SearchShelfKind
 import io.github.aedev.flow.ui.components.FeedGridLayout
 import io.github.aedev.flow.ui.components.PlaylistCard
 import io.github.aedev.flow.ui.components.PlaylistCardLayout
+import io.github.aedev.flow.ui.components.ShortsCard
 import io.github.aedev.flow.ui.components.shared.FeedPagingFooter
-import io.github.aedev.flow.ui.components.shared.MediaShortCard
 import io.github.aedev.flow.ui.components.shared.MediaVideoCard
-import io.github.aedev.flow.ui.components.shared.ShortCardDefaults
 import io.github.aedev.flow.ui.components.shared.dismissKeyboardOnPress
 import io.github.aedev.flow.ui.components.shared.rememberFeedGridPlan
 
@@ -141,7 +140,7 @@ fun SearchShortsGrid(
     modifier: Modifier = Modifier,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(ShortCardDefaults.MinWidth),
+        columns = GridCells.Adaptive(ShortCellMinWidth),
         state = gridState,
         modifier = modifier.fillMaxSize().dismissKeyboardOnPress(actions.dismissKeyboard),
         contentPadding =
@@ -151,8 +150,8 @@ fun SearchShortsGrid(
                 top = TopPadding,
                 bottom = BottomPadding,
             ),
-        horizontalArrangement = Arrangement.spacedBy(ShortCardDefaults.Spacing),
-        verticalArrangement = Arrangement.spacedBy(ShortCardDefaults.Spacing),
+        horizontalArrangement = Arrangement.spacedBy(ShortCellSpacing),
+        verticalArrangement = Arrangement.spacedBy(ShortCellSpacing),
     ) {
         items(
             count = pagingItems.itemCount,
@@ -160,7 +159,7 @@ fun SearchShortsGrid(
             contentType = { index -> pagingItems.peek(index).contentType() },
         ) { index ->
             (pagingItems[index] as? SearchResultItem.VideoResult)?.let { result ->
-                MediaShortCard(
+                ShortsCard(
                     video = result.video,
                     onClick = { actions.onShortsClick(pagingItems.loadedShorts(), result.video) },
                     modifier = Modifier.fillMaxSize(),
@@ -218,4 +217,6 @@ private fun SearchResultItem?.contentType(): Any =
 
 private val TopPadding = 8.dp
 private val BottomPadding = 90.dp
+private val ShortCellMinWidth = 160.dp
+private val ShortCellSpacing = 12.dp
 private val ShortGridPadding = 12.dp

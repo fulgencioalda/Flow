@@ -72,6 +72,8 @@ class MusicPlayerViewModel
 
         private var isInitialized = false
         private var loadTrackJob: kotlinx.coroutines.Job? = null
+        private var pendingLoadVideoId: String? = null
+        private var loadRequestGeneration = 0L
         private var pendingSeekPosition: Long? = null
         private var pendingSeekStartedAtMs: Long = 0L
 
@@ -276,7 +278,16 @@ class MusicPlayerViewModel
             queue: List<MusicTrack> = emptyList(),
             sourceName: String? = null,
         ) {
+            // The player screen can be composed immediately after a search click,
+            // while the original load is still resolving its stream. Do not cancel
+            // and restart that same request: doing so can make the first song play
+            // from the beginning a second time before the queue continues.
+            if (loadTrackJob?.isActive == true && pendingLoadVideoId == track.videoId) {
+                return
+            }
             loadTrackJob?.cancel()
+            pendingLoadVideoId = track.videoId
+            val requestGeneration = ++loadRequestGeneration
             // Genre-scoped surfaces tag their source; the genre becomes listen
             // context for this queue and is stripped from the display label.
             // Any non-tagged queue start clears the previous context.
@@ -360,6 +371,11 @@ class MusicPlayerViewModel
                         // seeds the radio pool for every new queue context.
                     }
                 }
+            loadTrackJob?.invokeOnCompletion {
+                if (loadRequestGeneration == requestGeneration) {
+                    pendingLoadVideoId = null
+                }
+            }
         }
 
         private fun resolveSourceName(
@@ -449,6 +465,19 @@ class MusicPlayerViewModel
         fun moveQueueTrackToEnd(index: Int) {
             val lastIndex = _uiState.value.queue.size - 1
             if (index in 0 until lastIndex) EnhancedMusicPlayerManager.moveMediaItem(index, lastIndex)
+        }
+
+        /** Removes a queued track immediately and permanently blocks its primary artist in MusicBrain. */
+        fun removeAndBlockQueueTrack(index: Int) {
+            val track = _uiState.value.queue.getOrNull(index) ?: return
+            EnhancedMusicPlayerManager.removeFromQueue(index)
+            dontRecommendArtist(track)
+        }
+
+        /** Removes a radio suggestion and permanently blocks its primary artist in MusicBrain. */
+        fun removeAndBlockRadioTrack(track: MusicTrack) {
+            EnhancedMusicPlayerManager.removeAutomixItem(track.videoId)
+            dontRecommendArtist(track)
         }
 
         fun playNextFromRadio(track: MusicTrack) {

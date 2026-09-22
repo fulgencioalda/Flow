@@ -118,9 +118,14 @@ fun MusicSearchScreen(
         dismissSearchInput()
         when (item) {
             is SongItem -> {
+                val selectedTrack = convertSongToMusicTrack(item)
                 onTrackClick(
-                    convertSongToMusicTrack(item),
-                    queue.filterIsInstance<SongItem>().map(::convertSongToMusicTrack),
+                    selectedTrack,
+                    // A search result is a single intent, not a playlist. Passing every
+                    // result as the playback queue made a query such as "Nadie" play
+                    // one same-titled result after another instead of starting radio
+                    // recommendations from the selected song.
+                    listOf(selectedTrack),
                     source,
                 )
             }

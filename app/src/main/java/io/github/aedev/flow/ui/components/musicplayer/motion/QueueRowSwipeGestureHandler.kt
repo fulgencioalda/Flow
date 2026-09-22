@@ -17,13 +17,13 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
 
-internal enum class QueueSwipeAction { PLAY_NEXT, ADD_TO_QUEUE }
+internal enum class QueueSwipeAction { REMOVE_AND_BLOCK }
 
 /**
  * Bidirectional four-phase horizontal swipe for queue rows: a tension zone that compresses the
  * first 60dp of finger travel into 20dp of visual travel, a haptic break-through that springs the
  * row out to the finger, 1:1 tracking with commit-zone haptics, and an elastic settle. Swiping
- * toward the start commits PLAY_NEXT; toward the end commits ADD_TO_QUEUE.
+ * in either direction commits REMOVE_AND_BLOCK.
  */
 internal class QueueRowSwipeGestureHandler(
     private val scope: CoroutineScope,
@@ -112,7 +112,7 @@ internal class QueueRowSwipeGestureHandler(
         val direction = sign(accumulated)
         phase = Phase.IDLE
         if (committed) {
-            val action = if (direction < 0f) QueueSwipeAction.PLAY_NEXT else QueueSwipeAction.ADD_TO_QUEUE
+            val action = QueueSwipeAction.REMOVE_AND_BLOCK
             haptics.performHapticFeedback(HapticFeedbackType.GestureEnd)
             settling = true
             scope.launch {
