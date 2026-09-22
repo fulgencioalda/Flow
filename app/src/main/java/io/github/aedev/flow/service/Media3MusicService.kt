@@ -141,6 +141,7 @@ class Media3MusicService : MediaLibraryService() {
     private var radioAutoplayEnabled = true
     private var loudnessNormalizationEnabled = true
     private var lastQueueIds: List<String>? = null
+
     /** Tracks that actually reached playback; future queue items are never included. */
     private val radioPlayedHistory = ArrayDeque<MusicTrack>()
 
@@ -1243,12 +1244,13 @@ class Media3MusicService : MediaLibraryService() {
             manager.automixItems.value
                 .filterNot { it.videoId in queueIds }
                 .take(MusicBrainParams.RADIO_MAX_CANDIDATE_WINDOW)
-        val batch = musicBrain.sequenceRadioBatch(
-            candidates = candidates,
-            previousTrack = manager.queue.value.lastOrNull(),
-            limit = RADIO_APPEND_BATCH,
-            recentTracks = radioPlayedHistory.toList(),
-        )
+        val batch =
+            musicBrain.sequenceRadioBatch(
+                candidates = candidates,
+                previousTrack = manager.queue.value.lastOrNull(),
+                limit = RADIO_APPEND_BATCH,
+                recentTracks = radioPlayedHistory.toList(),
+            )
         if (ended && batch.isNotEmpty() && !radioResumeWhenAppended) {
             radioResumeWhenAppended = true
             radioEndedItemCount = player.mediaItemCount

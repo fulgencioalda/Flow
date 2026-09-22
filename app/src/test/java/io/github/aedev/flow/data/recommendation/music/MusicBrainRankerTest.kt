@@ -155,11 +155,12 @@ class MusicBrainRankerTest {
 
     @Test
     fun `radio batch keeps one track per artist and credits collaborators`() {
-        val tracks = listOf(
-            MusicTrack("one", "One", "A", "", 1, artists = listOf(MusicArtist("A", "a"), MusicArtist("B", "b"))),
-            MusicTrack("two", "Two", "A", "", 1, artists = listOf(MusicArtist("A", "a"))),
-            MusicTrack("three", "Three", "C", "", 1, artists = listOf(MusicArtist("C", "c"))),
-        )
+        val tracks =
+            listOf(
+                MusicTrack("one", "One", "A", "", 1, artists = listOf(MusicArtist("A", "a"), MusicArtist("B", "b"))),
+                MusicTrack("two", "Two", "A", "", 1, artists = listOf(MusicArtist("A", "a"))),
+                MusicTrack("three", "Three", "C", "", 1, artists = listOf(MusicArtist("C", "c"))),
+            )
         assertThat(tracks.first().allArtistKeys()).containsExactly("a", "b")
 
         val inputs = tracks.map { input(it.videoId, it.primaryArtistKey()) }

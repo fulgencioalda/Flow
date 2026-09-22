@@ -282,19 +282,27 @@ class MusicBrainEngine
             val previous = previousTrack?.primaryArtistKey().orEmpty()
             val diversityHistory = recentTracks.takeLast(MusicBrainParams.RADIO_DIVERSITY_WINDOW)
             val rotationHistory = diversityHistory.takeLast(MusicBrainParams.RADIO_ARTIST_ROTATION_WINDOW)
-            val recentArtistKeys = rotationHistory
-                .flatMap { it.allArtistKeys() }
-                .filter { it.isNotEmpty() }
-                .toSet() + previous
-            val recentArtistCounts = diversityHistory
-                .flatMap { track -> track.primaryArtistKey().takeIf { it.isNotEmpty() }?.let { listOf(it) }.orEmpty() }
-                .groupingBy { it }
-                .eachCount()
+            val recentArtistKeys =
+                rotationHistory
+                    .flatMap { it.allArtistKeys() }
+                    .filter { it.isNotEmpty() }
+                    .toSet() + previous
+            val recentArtistCounts =
+                diversityHistory
+                    .flatMap { track ->
+                        track
+                            .primaryArtistKey()
+                            .takeIf { it.isNotEmpty() }
+                            ?.let { listOf(it) }
+                            .orEmpty()
+                    }.groupingBy { it }
+                    .eachCount()
             val recentTrackKeys = diversityHistory.map { it.radioTrackKey() }.toSet()
-            val recentAlbumCounts = diversityHistory
-                .mapNotNull { it.album.trim().takeIf(String::isNotEmpty) }
-                .groupingBy { it.lowercase() }
-                .eachCount()
+            val recentAlbumCounts =
+                diversityHistory
+                    .mapNotNull { it.album.trim().takeIf(String::isNotEmpty) }
+                    .groupingBy { it.lowercase() }
+                    .eachCount()
 
             fun select(
                 pool: List<MusicTrack>,
@@ -308,10 +316,11 @@ class MusicBrainEngine
                 val selectedTrackKeys = HashSet<String>()
                 val selectedAlbums = HashSet<String>()
                 val selected = ArrayList<MusicTrack>(limit)
-                val prioritizedPool = pool.sortedWith(
-                    compareBy<MusicTrack> { recentArtistCounts[it.primaryArtistKey()] ?: 0 }
-                        .thenBy { recentTrackKeys.contains(it.radioTrackKey()) }
-                )
+                val prioritizedPool =
+                    pool.sortedWith(
+                        compareBy<MusicTrack> { recentArtistCounts[it.primaryArtistKey()] ?: 0 }
+                            .thenBy { recentTrackKeys.contains(it.radioTrackKey()) },
+                    )
                 for (track in prioritizedPool) {
                     if (selected.size >= limit) break
                     val artists = track.allArtistKeys()
@@ -322,12 +331,16 @@ class MusicBrainEngine
                     if (avoidRepeatedSongs && trackKey in recentTrackKeys) continue
                     if (enforceArtistWindow &&
                         ((recentArtistCounts[primary] ?: 0) + (selectedPrimaryCounts[primary] ?: 0)) >=
-                            MusicBrainParams.RADIO_MAX_ARTIST_APPEARANCES
-                    ) continue
+                        MusicBrainParams.RADIO_MAX_ARTIST_APPEARANCES
+                    ) {
+                        continue
+                    }
                     val albumKey = track.album.trim().lowercase()
                     if (albumKey.isNotEmpty() && enforceAlbumWindow &&
                         ((recentAlbumCounts[albumKey] ?: 0) >= 2 || albumKey in selectedAlbums)
-                    ) continue
+                    ) {
+                        continue
+                    }
                     if (artists.any { it in selectedArtists }) continue
                     if (!selectedTrackKeys.add(trackKey)) continue
                     selected += track
@@ -340,24 +353,28 @@ class MusicBrainEngine
 
             // Strict pass: one song per credited artist and no artist from the last
             // 20 radio tracks (the two normal ten-track append batches).
-            val strict = select(unique, avoidRecent = true, enforceArtistWindow = true, avoidRepeatedSongs = true, enforceAlbumWindow = true)
+            val strict =
+                select(unique, avoidRecent = true, enforceArtistWindow = true, avoidRepeatedSongs = true, enforceAlbumWindow = true)
             if (strict.size >= limit) return strict
 
             // First fallback keeps one song per credited artist but relaxes the
             // 20-track rotation so stations with a narrow catalogue stay alive.
-            val relaxed = select(unique, avoidRecent = false, enforceArtistWindow = true, avoidRepeatedSongs = true, enforceAlbumWindow = true)
+            val relaxed =
+                select(unique, avoidRecent = false, enforceArtistWindow = true, avoidRepeatedSongs = true, enforceAlbumWindow = true)
             if (relaxed.size >= limit) return relaxed
 
             // Final fallback fills only when necessary; it still preserves the
             // artist seam and never duplicates a video id.
             val inputs = unique.map { MusicRankInput(trackId = it.videoId, artistKey = it.primaryArtistKey()) }
-            val order = MusicBrainRanker.spreadArtists(
-                order = inputs.indices.toList(),
-                inputs = inputs,
-                maxRun = MusicBrainParams.RADIO_MAX_CONSECUTIVE_ARTIST,
-                previousArtist = previous,
-            )
-            val finalFallback = select(unique, avoidRecent = false, enforceArtistWindow = false, avoidRepeatedSongs = false, enforceAlbumWindow = false)
+            val order =
+                MusicBrainRanker.spreadArtists(
+                    order = inputs.indices.toList(),
+                    inputs = inputs,
+                    maxRun = MusicBrainParams.RADIO_MAX_CONSECUTIVE_ARTIST,
+                    previousArtist = previous,
+                )
+            val finalFallback =
+                select(unique, avoidRecent = false, enforceArtistWindow = false, avoidRepeatedSongs = false, enforceAlbumWindow = false)
             return (relaxed + finalFallback + order.map { unique[it] }).distinctBy { it.videoId }.take(limit)
         }
 
@@ -619,23 +636,25 @@ internal fun MusicTrack.primaryArtistKey(): String {
 }
 
 /** All credited artist identities used by radio rotation and hidden-artist checks. */
-internal fun MusicTrack.allArtistKeys(): Set<String> = buildSet {
-    val primary = primaryArtistKey()
-    if (primary.isNotEmpty()) add(primary)
-    artists.forEach { credited ->
-        val key = musicArtistKey(credited.id, credited.name)
-        if (key.isNotEmpty()) add(key)
+internal fun MusicTrack.allArtistKeys(): Set<String> =
+    buildSet {
+        val primary = primaryArtistKey()
+        if (primary.isNotEmpty()) add(primary)
+        artists.forEach { credited ->
+            val key = musicArtistKey(credited.id, credited.name)
+            if (key.isNotEmpty()) add(key)
+        }
     }
-}
 
 /** Stable title/artist identity used to avoid replaying another upload of the same song. */
 internal fun MusicTrack.radioTrackKey(): String {
-    val normalizedTitle = title
-        .lowercase()
-        .replace(Regex("\\b(official|video|audio|lyrics|remaster|version)\\b"), " ")
-        .replace(Regex("[^a-z0-9áéíóúüñ]+"), " ")
-        .trim()
-        .replace(Regex("\\s+"), " ")
+    val normalizedTitle =
+        title
+            .lowercase()
+            .replace(Regex("\\b(official|video|audio|lyrics|remaster|version)\\b"), " ")
+            .replace(Regex("[^a-z0-9áéíóúüñ]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
     return if (normalizedTitle.isBlank()) videoId else "${primaryArtistKey()}|$normalizedTitle"
 }
 
